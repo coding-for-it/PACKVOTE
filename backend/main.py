@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import pandas as pd
+import os
 from io import BytesIO
 from starlette.concurrency import run_in_threadpool
 
@@ -38,8 +39,16 @@ def submit_preference(pref: Preference):
 
 @app.get("/download-template")
 def download_template():
-    return FileResponse("template.csv")
+    file_path = os.path.join(os.path.dirname(__file__), "template.csv")
 
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Template file not found")
+
+    return FileResponse(
+        path=file_path,
+        media_type="text/csv",
+        filename="template.csv"
+    )
 
 @app.post("/bulk_upload")
 async def bulk_upload(file: UploadFile = File(...)):
