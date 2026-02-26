@@ -28,7 +28,7 @@ def go_bulk():
     st.session_state.page = "bulk"
 
 
-# ✅ Updated display function to match backend
+# Updated display function to match backend
 def display_plan(plan_response):
     if plan_response.status_code != 200:
         st.error("Failed to generate plan.")
@@ -46,25 +46,25 @@ def display_plan(plan_response):
         st.error("Invalid plan format received.")
         return
 
-    st.markdown("## Group Trip Plan!")
+    st.markdown("## 🌍 Group Trip Plan")
     st.markdown("---")
 
-    st.subheader("Destination")
+    st.subheader("📍 Destination")
     st.write(plan.get("destination", "Not available"))
 
-    st.subheader("Itinerary")
+    st.subheader("🗓 Itinerary")
     st.write(plan.get("itinerary", "Not available"))
 
-    st.subheader("Budget Breakdown")
+    st.subheader("💰 Budget Breakdown")
     st.write(plan.get("budget_breakdown", "Not available"))
 
-    st.subheader("Activities")
+    st.subheader("🎯 Activities")
     st.write(plan.get("activities", "Not available"))
 
-    st.subheader("Food Suggestions")
+    st.subheader("🍽 Food Suggestions")
     st.write(plan.get("food_suggestions", "Not available"))
 
-    st.subheader("Travel Tips")
+    st.subheader("✈ Travel Tips")
     st.write(plan.get("travel_tips", "Not available"))
 
 
@@ -174,6 +174,19 @@ elif st.session_state.page == "bulk":
     st.button("⬅ Back", on_click=go_home)
 
     st.header("📂 Bulk Upload (10+ Members)")
+
+    # Download template from backend
+    template_response = requests.get(f"{BACKEND_URL}/download-template")
+
+    if template_response.status_code == 200:
+        st.download_button(
+            label="Download CSV Template",
+            data=template_response.content,
+            file_name="template.csv",
+            mime="text/csv"
+        )
+    else:
+        st.error("Unable to fetch template file.")
 
     uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
 
