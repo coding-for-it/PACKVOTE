@@ -1,135 +1,255 @@
-# Snowflake-Guided Constraint Planning System
+````markdown
+# Snowflake-Constrained AI Travel Planning System
 
 ## Overview
 
-Planning a group trip is complex due to:
+Planning a group trip is difficult because of:
 
-* Different budget ranges
-* Different trip duration preferences
-* Different travel styles
-* Risk of AI generating unrealistic or unaffordable plans
+- Different individual budgets  
+- Different duration preferences  
+- Different travel styles  
+- AI tendency to generate unrealistic luxury plans  
 
-This project solves that by separating:
+PackVote solves this by combining:
 
-* Deterministic constraint computation (Snowflake SQL)
-* Structured reasoning and plan generation (Gemini API)
+- **Deterministic constraint computation (Snowflake SQL)**
+- **Structured AI reasoning (Gemini API)**
+- **Hard affordability enforcement using minimum group budget**
 
-AI does not determine constraints — it operates within them.
+AI does not invent constraints.  
+It operates strictly within database-calculated boundaries.
+
+---
+
+## Core Planning Rule (Updated Logic)
+
+The most important system rule:
+
+> The total per-person cost MUST NOT exceed the group’s minimum budget.
+
+This ensures:
+
+- Every member can afford the base plan
+- No luxury bias
+- No average-based distortion
+- No unrealistic upgrades
+
+Optional premium add-ons may be suggested separately, but the base itinerary always respects the **minimum budget constraint**.
 
 ---
 
 ## System Architecture
 
-Frontend: Streamlit
-Backend: FastAPI
-Data Layer: Snowflake
-AI Layer: Gemini API
-Language: Python
-
-### Architecture Flow
-
-1. Users submit travel preferences via Streamlit.
-2. FastAPI backend stores preferences in Snowflake.
-3. Snowflake computes shared group constraints.
-4. Backend retrieves aggregated constraint results.
-5. Constraints are passed to Gemini API.
-6. AI generates a travel plan aligned with database-calculated limits.
-7. Group records can be cleared after plan generation.
+- **Frontend:** Streamlit  
+- **Backend:** FastAPI  
+- **Data Layer:** Snowflake  
+- **AI Layer:** Gemini API (Gemini 2.5 Flash)  
+- **Language:** Python  
 
 ---
 
-## Core Design Principle
+## Architecture Flow
 
-SQL handles deterministic constraint computation.
-AI handles structured reasoning.
-Database constraints guide generative output.
+1. Users submit preferences (Single, Group, or Bulk CSV).
+2. FastAPI stores preferences in Snowflake under a `GROUP_ID`.
+3. Snowflake computes aggregated constraints via a view.
+4. Backend retrieves:
+   - Minimum budget (hard constraint)
+   - Maximum budget
+   - Duration range
+   - Total users
+5. These constraints + individual preferences are sent to Gemini.
+6. Gemini returns **structured JSON only**.
+7. Backend returns structured plan to frontend.
+8. Group data can be cleared after planning.
 
-This separation ensures:
+---
 
-* Predictable cost boundaries
-* Duration harmonization
-* Controlled AI output
-* Group-level data isolation
+## Deterministic vs Generative Separation
+
+### Snowflake Handles:
+
+- Minimum budget enforcement
+- Duration range calculation
+- User counting
+- Group-level analytics
+- Data isolation
+
+### Gemini Handles:
+
+- Destination reasoning
+- Preference balancing
+- Itinerary creation
+- Activity and food suggestions
+- Structured JSON output
+
+This ensures AI cannot override financial constraints.
 
 ---
 
 ## Snowflake Components
 
-### Table
+### Table: `CORE.GROUP_PREFERENCES`
 
-**CORE.GROUP_PREFERENCES**
+Stores individual user preferences.
 
-Stores individual user preferences grouped by `GROUP_ID`.
+Columns:
 
-Includes:
-
-* Budget range (minimum and maximum)
-* Preferred duration
-* Travel style
-* Destination preferences (optional)
-
----
-
-### View
-
-**CORE.GROUP_ANALYTICS**
-
-Computes aggregated group-level constraints:
-
-* Minimum budget boundary
-* Maximum budget boundary
-* Duration range overlap
-* Total participants
-
-This view ensures AI receives validated and computed limits.
+- `GROUP_ID`
+- `USER_ID` (Auto Increment)
+- `BUDGET`
+- `DESTINATION`
+- `DURATION`
+- `TRAVEL_STYLE`
+- `SHOPPING_INTEREST`
+- `CREATED_AT`
 
 ---
 
-### Stored Procedure
+### View: `CORE.GROUP_ANALYTICS`
 
-**CORE.CLEAR_GROUP**
+Aggregates group-level constraints:
 
-Removes group-specific records after plan generation.
+- `TOTAL_USERS`
+- `AVG_BUDGET` (for insight only, not used in constraint)
+- `MIN_BUDGET` (hard affordability constraint)
+- `MAX_BUDGET`
+- `MIN_DURATION`
+- `MAX_DURATION`
+
+**Important:**  
+AI uses `MIN_BUDGET` only as the affordability ceiling.
+
+---
+
+### Stored Procedure: `CORE.CLEAR_GROUP`
+
+Deletes preferences for a specific `GROUP_ID`.
 
 Used for:
 
-* Data lifecycle management
-* Session-based planning
-* Clean state reset
+- Resetting session
+- Cleaning test data
+- Managing lifecycle
 
 ---
 
 ## Key Features
 
-* Multi-user preference aggregation
-* Budget boundary enforcement
-* Duration range harmonization
-* Warehouse-driven constraint logic
-* Controlled AI-based plan generation
-* Group data isolation via `GROUP_ID`
-* Post-plan cleanup using stored procedure
+- Hard minimum budget enforcement
+- AI cannot exceed affordability boundary
+- No average-based distortion
+- Majority preference reasoning (AI-based)
+- Structured JSON output from AI
+- Multi-member preference aggregation
+- CSV bulk upload
+- Template download endpoint
+- Group data isolation using `GROUP_ID`
+- Clean reset mechanism
+
+---
+
+## API Endpoints
+
+### `GET /`
+Health check endpoint.
+
+---
+
+### `POST /submit`
+Submit single user preference.
+
+---
+
+### `POST /bulk_upload`
+Upload CSV file containing multiple users.
+
+Required CSV columns:
+
+- `budget`
+- `destination`
+- `duration`
+- `travel_style`
+- `shopping_interest`
+
+---
+
+### `GET /download-template`
+Downloads `template.csv` from backend.
+
+Used by Streamlit "Download Template" button.
+
+---
+
+### `GET /generate-plan`
+
+Generates AI-constrained travel plan.
+
+Returns:
+
+```json
+{
+  "status": "success",
+  "plan": {
+      "destination": "",
+      "reason": "",
+      "itinerary": "",
+      "optional_addons": "",
+      "budget_breakdown": "",
+      "activities": "",
+      "food_suggestions": "",
+      "travel_tips": ""
+  }
+}
+````
+
+AI is forced to return:
+
+* Valid JSON only
+* No markdown
+* No extra explanation outside JSON
 
 ---
 
 ## End-to-End Flow
 
-```text
+```
 User Input (Streamlit)
         ↓
 FastAPI Backend
         ↓
-Snowflake Table (GROUP_PREFERENCES)
+Snowflake GROUP_PREFERENCES
         ↓
-Snowflake View (GROUP_ANALYTICS)
+Snowflake GROUP_ANALYTICS
         ↓
-Aggregated Constraints
+Computed Constraints
         ↓
-Gemini API (Plan Generation)
+Gemini API (within hard limits)
         ↓
-Structured Travel Plan Output
+Structured JSON Plan
         ↓
-Optional: CLEAR_GROUP Procedure
+Frontend Display
 ```
+
+---
+
+## Constraint Enforcement Strategy
+
+The prompt sent to Gemini includes:
+
+* Hard rule: Total cost ≤ MIN_BUDGET
+* Prohibition of average-based decision making
+* No defaulting to generic destinations
+* Must analyze all preferences
+* Must maximize group satisfaction
+* Must return valid JSON only
+
+This prevents:
+
+* Generic destination bias
+* Luxury drift
+* Over-budget plans
+* Non-structured outputs
 
 ---
 
@@ -162,18 +282,19 @@ SNOWFLAKE_SCHEMA=CORE
 
 ### 3. Create Snowflake Objects
 
-In Snowflake:
+Create:
 
-* Create database and schema
-* Create `GROUP_PREFERENCES` table
-* Create `GROUP_ANALYTICS` view
-* Create `CLEAR_GROUP` stored procedure
-
-Ensure warehouse permissions are properly configured.
+* Database
+* Schema `CORE`
+* `GROUP_PREFERENCES` table
+* `GROUP_ANALYTICS` view
+* `CLEAR_GROUP` stored procedure
+* CSV file format
+* Internal stage (for bulk uploads)
 
 ---
 
-### 4. Run Backend Server
+### 4. Run Backend
 
 ```bash
 uvicorn main:app --reload
@@ -187,7 +308,7 @@ http://127.0.0.1:8000
 
 ---
 
-### 5. Launch Streamlit Frontend
+### 5. Run Frontend
 
 ```bash
 streamlit run app.py
@@ -195,51 +316,22 @@ streamlit run app.py
 
 ---
 
-## How to Use
+## Why This Architecture Is Strong
 
-1. Open the Streamlit interface.
-2. Enter group travel preferences.
-3. Submit preferences for multiple users under the same `GROUP_ID`.
-4. Click "Generate Plan".
-5. System computes shared constraints in Snowflake.
-6. Gemini generates a plan aligned with computed boundaries.
-7. Optionally clear group data using the stored procedure.
+Traditional AI-only planners:
 
----
+* Ignore hard affordability
+* Use averages incorrectly
+* Produce unrealistic itineraries
+* Lack structured output control
 
-## Data Isolation Strategy
-
-* Each group is identified using `GROUP_ID`.
-* All computations are filtered by `GROUP_ID`.
-* No cross-group data leakage.
-* Clean lifecycle through stored procedure reset.
-
----
-
-## Why This Architecture Works
-
-Traditional AI-only travel planners:
-
-* Ignore hard affordability constraints
-* Generate unrealistic itineraries
-* Lack deterministic control
-
-This system:
+PackVote:
 
 * Uses Snowflake for constraint enforcement
-* Uses AI only within computed bounds
-* Produces realistic, group-aligned travel plans
+* Uses AI only within computed limits
+* Ensures affordability for all members
+* Returns predictable structured output
+* Separates deterministic logic from generative reasoning
 
----
-
-## Future Enhancements
-
-* Destination availability validation
-* Flight and hotel price integration
-* Real-time budget validation APIs
-* User authentication
-* Multi-destination optimization
-* Cost breakdown visualization
-
----
-
+```
+```
