@@ -1,4 +1,3 @@
-````markdown
 # Snowflake-Constrained AI Travel Planning System
 
 ## Overview
@@ -333,5 +332,5 @@ PackVote:
 * Returns predictable structured output
 * Separates deterministic logic from generative reasoning
 
-```
-```
+
+
