@@ -1,100 +1,171 @@
-import snowflake.connector
 import os
+import pandas as pd
+import tempfile
+import snowflake.connector
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 
 def get_connection():
     return snowflake.connector.connect(
-        user=os.getenv("SF_USER"),
-        password=os.getenv("SF_PASSWORD"),
-        account=os.getenv("SF_ACCOUNT"),
-        warehouse="PACKVOTE_WH",
-        database="PACKVOTE_DB",
-        schema="CORE",
+        user=os.getenv("SNOWFLAKE_USER"),
+        password=os.getenv("SNOWFLAKE_PASSWORD"),
+        account=os.getenv("SNOWFLAKE_ACCOUNT"),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
+        database=os.getenv("SNOWFLAKE_DATABASE"),
+        schema=os.getenv("SNOWFLAKE_SCHEMA"),
+        role=os.getenv("SNOWFLAKE_ROLE"),
+        client_session_keep_alive=True
     )
 
 
-# Insert preference with GROUP_ID
-def insert_preference(data, group_id):
+def clear_group(group_id: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "DELETE FROM CORE.GROUP_PREFERENCES WHERE GROUP_ID = %s",
+            (group_id,)
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def insert_preference(data: dict, group_id: str):
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
+    try:
+        query = """
+            INSERT INTO CORE.GROUP_PREFERENCES
+            (GROUP_ID, BUDGET, DESTINATION, DURATION, TRAVEL_STYLE, SHOPPING_INTEREST)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """
-        INSERT INTO GROUP_PREFERENCES
-        (GROUP_ID, BUDGET, DESTINATION, DURATION, TRAVEL_STYLE, SHOPPING_INTEREST)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (
+
+        values = (
             group_id,
-            data["budget"],
-            data["destination"],
-            data["duration"],
-            data["travel_style"],
-            data["shopping_interest"],
-        ),
-    )
+            data.get("budget"),
+            data.get("destination"),
+            data.get("duration"),
+            data.get("travel_style"),
+            data.get("shopping_interest")
+        )
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+        cursor.execute(query, values)
+        conn.commit()
+
+    finally:
+        cursor.close()
+        conn.close()
 
 
-# Fetch preferences by GROUP_ID
-def fetch_all_preferences(group_id):
+def get_group_analytics(group_id: str):
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
-        "SELECT * FROM GROUP_PREFERENCES WHERE GROUP_ID = %s",
-        (group_id,),
-    )
-
-    rows = cursor.fetchall()
-    columns = [col[0] for col in cursor.description]
-
-    result = []
-    for row in rows:
-        result.append(dict(zip(columns, row)))
-
-    cursor.close()
-    conn.close()
-
-    return result
-
-
-# Fetch analytics from Snowflake VIEW
-def fetch_group_analytics(group_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
+    try:
+        query = """
+            SELECT
+                GROUP_ID,
+                COUNT(*) AS TOTAL_USERS,
+                AVG(BUDGET) AS AVG_BUDGET,
+                MIN(BUDGET) AS MIN_BUDGET,
+                MAX(BUDGET) AS MAX_BUDGET,
+                MAX(DURATION) AS MAX_DURATION,
+                MIN(DURATION) AS MIN_DURATION
+            FROM CORE.GROUP_PREFERENCES
+            WHERE GROUP_ID = %s
+            GROUP BY GROUP_ID
         """
-        SELECT TOTAL_USERS, AVG_BUDGET, MIN_BUDGET, MAX_BUDGET,
-               MAX_DURATION, MIN_DURATION
-        FROM GROUP_ANALYTICS
-        WHERE GROUP_ID = %s
-        """,
-        (group_id,),
-    )
 
-    result = cursor.fetchone()
+        cursor.execute(query, (group_id,))
+        result = cursor.fetchone()
 
-    cursor.close()
-    conn.close()
+        if not result:
+            return None
 
-    return result
+        columns = [col[0].lower() for col in cursor.description]
+        return dict(zip(columns, result))
 
-# Call stored procedure instead of deleting directly
-def clear_group_data(group_id):
+    finally:
+        cursor.close()
+        conn.close()
+
+def upload_preferences_via_stage(data_list, group_id):
+
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("CALL CLEAR_GROUP(%s)", (group_id,))
-    conn.commit()
+    try:
+        # Ensure correct database & schema
+        cursor.execute("USE DATABASE " + os.getenv("SNOWFLAKE_DATABASE"))
+        cursor.execute("USE SCHEMA CORE")
 
-    cursor.close()
-    conn.close()
+        df = pd.DataFrame(data_list)
+        df["GROUP_ID"] = group_id
+
+        df = df[
+            [
+                "GROUP_ID",
+                "budget",
+                "destination",
+                "duration",
+                "travel_style",
+                "shopping_interest",
+            ]
+        ]
+
+        df.columns = [
+            "GROUP_ID",
+            "BUDGET",
+            "DESTINATION",
+            "DURATION",
+            "TRAVEL_STYLE",
+            "SHOPPING_INTEREST",
+        ]
+
+        # Create temp CSV
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            df.to_csv(tmp.name, index=False)
+            file_path = tmp.name
+
+        print("Uploading file:", file_path)
+
+        # PUT file to internal stage
+        cursor.execute(
+            f"PUT file://{file_path} @PACKVOTE_STAGE OVERWRITE=TRUE"
+        )
+
+        print("File uploaded to stage")
+
+        # COPY INTO table
+        cursor.execute(
+            """
+            COPY INTO GROUP_PREFERENCES
+            (GROUP_ID, BUDGET, DESTINATION, DURATION, TRAVEL_STYLE, SHOPPING_INTEREST)
+            FROM @PACKVOTE_STAGE
+            ON_ERROR = 'ABORT_STATEMENT'
+            """
+        )
+
+        print("Data copied into table")
+
+        # Clean stage
+        cursor.execute("REMOVE @PACKVOTE_STAGE")
+
+        conn.commit()
+        os.remove(file_path)
+
+        print("Upload completed successfully")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise e
+
+    finally:
+        cursor.close()
+        conn.close()
