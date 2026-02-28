@@ -1,8 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from pathlib import Path
 import pandas as pd
-import os
 from io import BytesIO
 from starlette.concurrency import run_in_threadpool
 
@@ -12,10 +12,10 @@ from backend.db import (
     upload_preferences_via_stage,
     clear_group
 )
+
 from backend.services.ai_service import generate_group_trip_plan
 
 app = FastAPI()
-GROUP_ID = "G1"
 
 
 class Preference(BaseModel):
@@ -31,17 +31,22 @@ def home():
     return {"message": "PackVote Backend Running"}
 
 
-@app.post("/submit")
-def submit_preference(pref: Preference):
-    insert_preference(pref.dict(), GROUP_ID)
+# ---------------- SUBMIT PREFERENCE ----------------
+@app.post("/submit/{group_id}")
+def submit_preference(group_id: str, pref: Preference):
+
+    insert_preference(pref.dict(), group_id)
+
     return {"status": "success"}
 
 
+# ---------------- DOWNLOAD CSV TEMPLATE ----------------
 @app.get("/download-template")
 def download_template():
-    file_path = os.path.join(os.path.dirname(__file__), "template.csv")
 
-    if not os.path.exists(file_path):
+    file_path = Path(__file__).resolve().parent / "template.csv"
+
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail="Template file not found")
 
     return FileResponse(
@@ -50,20 +55,27 @@ def download_template():
         filename="template.csv"
     )
 
-@app.post("/bulk_upload")
-async def bulk_upload(file: UploadFile = File(...)):
+
+# ---------------- BULK UPLOAD ----------------
+@app.post("/bulk_upload/{group_id}")
+async def bulk_upload(group_id: str, file: UploadFile = File(...)):
+
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files allowed")
 
     contents = await file.read()
 
     try:
+
         df = pd.read_csv(BytesIO(contents))
         df.columns = df.columns.str.strip().str.lower()
 
         required_columns = [
-            "budget", "destination", "duration",
-            "travel_style", "shopping_interest"
+            "budget",
+            "destination",
+            "duration",
+            "travel_style",
+            "shopping_interest"
         ]
 
         missing_cols = [col for col in required_columns if col not in df.columns]
@@ -74,41 +86,40 @@ async def bulk_upload(file: UploadFile = File(...)):
                 detail=f"Missing columns: {missing_cols}. Found: {df.columns.tolist()}"
             )
 
-        clear_group(GROUP_ID)
+        clear_group(group_id)
 
         upload_preferences_via_stage(
             df[required_columns].to_dict(orient="records"),
-            GROUP_ID
+            group_id
         )
 
         return {"message": "Bulk preferences uploaded successfully."}
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/generate-plan")
-async def generate_plan():
-    try:
-        analytics = get_group_analytics(GROUP_ID)
-
-        if not analytics:
-            return {
-                "status": "error",
-                "message": "No analytics data found. Upload preferences first."
-            }
-
-        result = await run_in_threadpool(
-            generate_group_trip_plan,
-            analytics
-        )
-
-        if "error" in result:
-            return {"status": "error", "message": result["error"]}
-
-        return {"status": "success", "plan": result}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------- GENERATE PLAN ----------------
+@app.post("/start-plan/{group_id}")
+async def start_plan(group_id: str):
+
+    analytics = get_group_analytics(group_id)
+
+    if not analytics:
+        return {
+            "status": "error",
+            "message": "No analytics data found. Upload preferences first."
+        }
+
+    result = await run_in_threadpool(
+        generate_group_trip_plan,
+        analytics
+    )
+
+    if "error" in result:
+        return {"status": "error", "message": result["error"]}
+
+    return {"status": "success", "plan": result}
