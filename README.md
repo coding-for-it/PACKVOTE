@@ -49,18 +49,32 @@ Optional premium add-ons may be suggested separately, but the base itinerary alw
 
 ## Architecture Flow
 
-1. Users submit preferences (Single, Group, or Bulk CSV).
-2. FastAPI stores preferences in Snowflake under a `GROUP_ID`.
-3. Snowflake computes aggregated constraints via a view.
-4. Backend retrieves:
-   - Minimum budget (hard constraint)
-   - Maximum budget
-   - Duration range
-   - Total users
-5. These constraints + individual preferences are sent to Gemini.
-6. Gemini returns **structured JSON only**.
-7. Backend returns structured plan to frontend.
-8. Group data can be cleared after planning.
+Architecture Flow
+
+1. Users submit travel preferences through the Streamlit frontend (Single user, Small group, or Bulk CSV).
+
+2. The frontend generates a unique group_id so each group’s data stays separate.
+
+3. FastAPI backend receives the data and stores preferences in Snowflake under that group_id.
+
+4. For bulk uploads, users download a CSV template, fill it, and upload it.
+
+5. Bulk CSV data is uploaded to Snowflake using staging and COPY INTO for faster processing.
+
+6. Snowflake aggregates group constraints using SQL queries (min budget, max budget, duration range, total users).
+
+7. Backend retrieves these group constraints + preferences.
+
+8. These details are sent to Gemini 2.5 Flash to generate a trip plan.
+
+9. The AI returns a structured JSON plan (destination, itinerary, budget, activities, etc.).
+
+10. FastAPI sends the final plan back to the Streamlit frontend.
+
+11. The frontend displays the group trip plan to users.
+
+12. Group data can be cleared after plan generation to avoid mixing groups.
+
 
 ---
 
