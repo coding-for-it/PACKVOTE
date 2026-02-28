@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import uuid
 
 st.set_page_config(
     page_title="PackVote",
@@ -7,6 +8,10 @@ st.set_page_config(
 )
 
 BACKEND_URL = "http://127.0.0.1:8000"
+
+# Generate unique group id for session
+if "group_id" not in st.session_state:
+    st.session_state.group_id = str(uuid.uuid4())
 
 if "page" not in st.session_state:
     st.session_state.page = "home"
@@ -28,8 +33,9 @@ def go_bulk():
     st.session_state.page = "bulk"
 
 
-# Updated display function to match backend
+# ---------------- DISPLAY PLAN ----------------
 def display_plan(plan_response):
+
     if plan_response.status_code != 200:
         st.error("Failed to generate plan.")
         return
@@ -46,25 +52,25 @@ def display_plan(plan_response):
         st.error("Invalid plan format received.")
         return
 
-    st.markdown("## 🌍 Group Trip Plan")
+    st.markdown("##Group Trip Plan!")
     st.markdown("---")
 
-    st.subheader("📍 Destination")
+    st.subheader("Destination")
     st.write(plan.get("destination", "Not available"))
 
-    st.subheader("🗓 Itinerary")
+    st.subheader("Itinerary")
     st.write(plan.get("itinerary", "Not available"))
 
-    st.subheader("💰 Budget Breakdown")
+    st.subheader("Budget Breakdown")
     st.write(plan.get("budget_breakdown", "Not available"))
 
-    st.subheader("🎯 Activities")
+    st.subheader("Activities")
     st.write(plan.get("activities", "Not available"))
 
-    st.subheader("🍽 Food Suggestions")
+    st.subheader("Food Suggestions")
     st.write(plan.get("food_suggestions", "Not available"))
 
-    st.subheader("✈ Travel Tips")
+    st.subheader("Travel Tips")
     st.write(plan.get("travel_tips", "Not available"))
 
 
@@ -116,13 +122,21 @@ elif st.session_state.page == "single":
             "shopping_interest": shopping_interest,
         }
 
-        response = requests.post(f"{BACKEND_URL}/submit", json=payload)
+        response = requests.post(
+            f"{BACKEND_URL}/submit/{st.session_state.group_id}",
+            json=payload,
+            timeout=10
+        )
 
         if response.status_code == 200:
+
             st.success("Preference submitted successfully!")
 
             with st.spinner("Generating plan..."):
-                plan = requests.get(f"{BACKEND_URL}/generate-plan")
+                plan = requests.post(
+                    f"{BACKEND_URL}/start-plan/{st.session_state.group_id}",
+                    timeout=180
+                )
 
             display_plan(plan)
 
@@ -153,7 +167,11 @@ elif st.session_state.page == "group":
             "shopping_interest": shopping_interest,
         }
 
-        response = requests.post(f"{BACKEND_URL}/submit", json=payload)
+        response = requests.post(
+            f"{BACKEND_URL}/submit/{st.session_state.group_id}",
+            json=payload,
+            timeout=10
+        )
 
         if response.status_code == 200:
             st.success("Member preference added!")
@@ -163,7 +181,11 @@ elif st.session_state.page == "group":
     if st.button("Generate Group Plan"):
 
         with st.spinner("Generating AI group plan..."):
-            plan = requests.get(f"{BACKEND_URL}/generate-plan")
+
+            plan = requests.post(
+                f"{BACKEND_URL}/start-plan/{st.session_state.group_id}",
+                timeout=180
+            )
 
         display_plan(plan)
 
@@ -173,35 +195,47 @@ elif st.session_state.page == "bulk":
 
     st.button("⬅ Back", on_click=go_home)
 
-    st.header("📂 Bulk Upload (10+ Members)")
+    st.header("📂 Bulk Upload")
 
-    # Download template from backend
-    template_response = requests.get(f"{BACKEND_URL}/download-template")
+    if st.button("Download CSV Template"):
 
-    if template_response.status_code == 200:
-        st.download_button(
-            label="Download CSV Template",
-            data=template_response.content,
-            file_name="template.csv",
-            mime="text/csv"
+        template_response = requests.get(
+            f"{BACKEND_URL}/download-template",
+            timeout=10
         )
-    else:
-        st.error("Unable to fetch template file.")
+
+        if template_response.status_code == 200:
+
+            st.download_button(
+                label="Click to Download Template",
+                data=template_response.content,
+                file_name="template.csv",
+                mime="text/csv"
+            )
+
+        else:
+            st.error("Unable to fetch template file.")
 
     uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
 
     if uploaded_file is not None:
 
         response = requests.post(
-            f"{BACKEND_URL}/bulk_upload",
-            files={"file": uploaded_file}
+            f"{BACKEND_URL}/bulk_upload/{st.session_state.group_id}",
+            files={"file": uploaded_file},
+            timeout=60
         )
 
         if response.status_code == 200:
+
             st.success("Bulk upload successful!")
 
             with st.spinner("Generating AI group plan..."):
-                plan = requests.get(f"{BACKEND_URL}/generate-plan")
+
+                plan = requests.post(
+                    f"{BACKEND_URL}/start-plan/{st.session_state.group_id}",
+                    timeout=180
+                )
 
             display_plan(plan)
 
