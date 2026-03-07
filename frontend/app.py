@@ -52,14 +52,14 @@ def display_plan(plan_response):
         st.error("Invalid plan format received.")
         return
 
-    st.markdown("##Group Trip Plan!")
+    st.markdown("## Group Trip Plan!")
     st.markdown("---")
 
     st.subheader("Destination")
     st.write(plan.get("destination", "Not available"))
 
     st.subheader("Itinerary")
-    st.write(plan.get("itinerary", "Not available"))
+    st.markdown(plan.get("itinerary", "Not available"))
 
     st.subheader("Budget Breakdown")
     st.write(plan.get("budget_breakdown", "Not available"))
