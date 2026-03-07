@@ -1,12 +1,8 @@
-import os
 import json
 import re
 from google import genai
-from dotenv import load_dotenv
 
-load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+from backend.config import GEMINI_API_KEY
 
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found in environment variables")
@@ -54,6 +50,30 @@ HARD CONSTRAINTS:
 
 6. Higher budget members may receive OPTIONAL add-ons,
    but base itinerary must remain within {min_budget}.
+
+---------------------------------------
+
+MANDATORY DECISION PROCESS
+
+Before selecting a destination, you MUST internally perform the following analysis:
+
+Step 1: Count how many users prefer each travel_style.
+
+Step 2: Identify the most common travel_style in the group.
+
+Step 3: Check duration overlap that works for the maximum number of users.
+
+Step 4: Consider shopping_interest patterns.
+
+Step 5: Based on the above analysis, select a destination that satisfies the majority of preferences AND remains within the minimum budget constraint.
+
+Do NOT skip this reasoning process.
+
+If a destination from the user-provided inputs satisfies the majority of group preferences, select from those options.
+
+If none of the provided destinations fully satisfy the group’s preferences, you may generate and suggest a new destination that better matches the combined requirements.
+
+In both cases, you must clearly explain the reasoning behind the chosen destination.
 
 ---------------------------------------
 
@@ -105,24 +125,21 @@ JSON STRUCTURE:
 
         raw_text = response.text.strip()
 
-        # Try direct JSON parse
         try:
             plan_json = json.loads(raw_text)
         except json.JSONDecodeError:
-            # Fallback: extract JSON object from response
             json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+
             if not json_match:
                 return {"error": "Invalid JSON format received from AI"}
 
             json_text = json_match.group()
 
-            # Fix common trailing comma issues
             json_text = re.sub(r",\s*}", "}", json_text)
             json_text = re.sub(r",\s*]", "]", json_text)
 
             plan_json = json.loads(json_text)
 
-        # Validate required top-level keys
         required_keys = [
             "destination",
             "reason",
@@ -139,7 +156,6 @@ JSON STRUCTURE:
             if key not in plan_json:
                 return {"error": f"Missing required field: {key}"}
 
-        # Validate budget constraint strictly
         budget_info = plan_json.get("budget_breakdown", {})
         per_person_total = budget_info.get("per_person_total", 0)
 
@@ -147,6 +163,15 @@ JSON STRUCTURE:
             return {
                 "error": f"Generated plan exceeds minimum budget constraint ({min_budget})"
             }
+        
+        # Destination validation guardrail
+        destination = plan_json.get("destination", "").strip()
+        reason = plan_json.get("reason", "").strip()
+        if not destination:
+            return {"error": "AI did not generate a destination"}
+
+        if not reason:
+            return {"error": "AI must explain why the destination was selected"}
 
         return plan_json
 
