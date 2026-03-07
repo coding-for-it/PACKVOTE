@@ -1,10 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from pathlib import Path
 import pandas as pd
 from io import BytesIO
 from starlette.concurrency import run_in_threadpool
+
+from backend.models import Preference
 
 from backend.db import (
     get_group_analytics,
@@ -18,24 +19,16 @@ from backend.services.ai_service import generate_group_trip_plan
 app = FastAPI()
 
 
-class Preference(BaseModel):
-    budget: float
-    destination: str
-    duration: int
-    travel_style: str
-    shopping_interest: str
-
-
 @app.get("/")
 def home():
-    return {"message": "PackVote Backend Running"}
+    return {"message": "Backend Running"}
 
 
 # ---------------- SUBMIT PREFERENCE ----------------
 @app.post("/submit/{group_id}")
 def submit_preference(group_id: str, pref: Preference):
 
-    insert_preference(pref.dict(), group_id)
+    insert_preference(pref.model_dump(), group_id)
 
     return {"status": "success"}
 
