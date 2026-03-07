@@ -2,20 +2,18 @@ import os
 import pandas as pd
 import tempfile
 import snowflake.connector
-from dotenv import load_dotenv
 
-load_dotenv()
+from backend.config import SNOWFLAKE_CONFIG
 
 
 def get_connection():
     return snowflake.connector.connect(
-        user=os.getenv("SNOWFLAKE_USER"),
-        password=os.getenv("SNOWFLAKE_PASSWORD"),
-        account=os.getenv("SNOWFLAKE_ACCOUNT"),
-        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE"),
-        database=os.getenv("SNOWFLAKE_DATABASE"),
-        schema=os.getenv("SNOWFLAKE_SCHEMA"),
-        role=os.getenv("SNOWFLAKE_ROLE"),
+        user=SNOWFLAKE_CONFIG["user"],
+        password=SNOWFLAKE_CONFIG["password"],
+        account=SNOWFLAKE_CONFIG["account"],
+        warehouse=SNOWFLAKE_CONFIG["warehouse"],
+        database=SNOWFLAKE_CONFIG["database"],
+        schema=SNOWFLAKE_CONFIG["schema"],
         client_session_keep_alive=True
     )
 
@@ -94,14 +92,15 @@ def get_group_analytics(group_id: str):
         cursor.close()
         conn.close()
 
+
 def upload_preferences_via_stage(data_list, group_id):
 
     conn = get_connection()
     cursor = conn.cursor()
 
     try:
-        # Ensure correct database & schema
-        cursor.execute("USE DATABASE " + os.getenv("SNOWFLAKE_DATABASE"))
+
+        cursor.execute("USE DATABASE " + SNOWFLAKE_CONFIG["database"])
         cursor.execute("USE SCHEMA CORE")
 
         df = pd.DataFrame(data_list)
@@ -127,21 +126,14 @@ def upload_preferences_via_stage(data_list, group_id):
             "SHOPPING_INTEREST",
         ]
 
-        # Create temp CSV
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
             df.to_csv(tmp.name, index=False)
             file_path = tmp.name
 
-        print("Uploading file:", file_path)
-
-        # PUT file to internal stage
         cursor.execute(
             f"PUT file://{file_path} @PACKVOTE_STAGE OVERWRITE=TRUE"
         )
 
-        print("File uploaded to stage")
-
-        # COPY INTO table
         cursor.execute(
             """
             COPY INTO GROUP_PREFERENCES
@@ -151,20 +143,10 @@ def upload_preferences_via_stage(data_list, group_id):
             """
         )
 
-        print("Data copied into table")
-
-        # Clean stage
         cursor.execute("REMOVE @PACKVOTE_STAGE")
 
         conn.commit()
         os.remove(file_path)
-
-        print("Upload completed successfully")
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise e
 
     finally:
         cursor.close()
